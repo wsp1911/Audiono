@@ -48,14 +48,14 @@ def DC(chunk, vpp):
     return chunk, vpp * np.ones(chunk)
 
 
-def from_exp(fs, chunk, factor, s: str):
+def from_exp(fs, chunk, s: str):
     try:
         id1 = s.find(",")
         t1 = 0 if id1 == -1 else eval(s[:id1])
         id2 = s.find(";")
         t2 = 1 if id2 == -1 else eval(s[id1 + 1 : id2])
         t = np.arange(t1, t2, 1 / fs)
-        y = factor * eval(s[id2 + 1 :])
+        y = eval(s[id2 + 1 :])
         N = len(y)
         period = int(np.ceil(chunk / N))
         return N, np.tile(y, period)
@@ -63,19 +63,19 @@ def from_exp(fs, chunk, factor, s: str):
         return -1, 0
 
 
-def getWave(CHUNK, factor, fs, wave_type, f, vpp, duty, offset, phi):
+def getWave(CHUNK, fs, wave_type, f, vpp, duty, offset, phi):
     if wave_type == 0:
         return -1, np.zeros(CHUNK)
     elif wave_type == 1:
-        return SineWave(fs, CHUNK, f, vpp * factor, offset, phi)
+        return SineWave(fs, CHUNK, f, vpp, offset, phi)
     elif wave_type == 2:
-        return SquareWave(fs, CHUNK, f, vpp * factor, duty, offset, phi)
+        return SquareWave(fs, CHUNK, f, vpp, duty, offset, phi)
     elif wave_type == 3:
-        return DC(CHUNK, vpp * factor)
+        return DC(CHUNK, vpp)
     elif wave_type == 4:
-        return TriangleWave(fs, CHUNK, f, vpp * factor, duty, offset, phi)
+        return TriangleWave(fs, CHUNK, f, vpp, duty, offset, phi)
     elif wave_type == 5:
-        return SawtoothWave(fs, CHUNK, f, vpp * factor, offset, phi)
+        return SawtoothWave(fs, CHUNK, f, vpp, offset, phi)
 
 
 def from_file(CHUNK, filename, fs=0):

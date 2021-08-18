@@ -18,10 +18,84 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QStatusBar,
     QWidget,
+    QApplication,
 )
 from PyQt5.QtCore import QTimer, Qt, QObject, pyqtSignal, QThread
+import configparser
 
-# from PyQt5.QtGui import QColor
+
+class Config:
+    """
+    单独抽象为一类，避免ConfigParser使用时需要频繁数据类型转换，同时各个子应用共享该类的指针，校准时一处修改即可全局生效
+    """
+
+    def __init__(self, filename="", config=None):
+        if filename:
+            config = configparser.ConfigParser()
+            config.read(filename)
+        self.CHUNK = config.getint("General", "chunk")
+        self.RATE = config.getint("General", "rate")
+        self.input_gain = [
+            config.getfloat("Input", "gain0"),
+            config.getfloat("Input", "gain1"),
+        ]
+        self.input_offset = [
+            config.getfloat("Input", "offset0"),
+            config.getfloat("Input", "offset1"),
+        ]
+        self.output_gain = [
+            config.getfloat("Output", "gain0"),
+            config.getfloat("Output", "gain1"),
+        ]
+        self.output_offset = [
+            config.getfloat("Output", "offset0"),
+            config.getfloat("Output", "offset1"),
+        ]
+
+    def save(self, filename):
+        config = configparser.ConfigParser()
+        config["General"] = {"chunk": str(self.CHUNK), "rate": str(self.RATE)}
+        config["Input"] = {
+            "gain0": str(self.input_gain[0]),
+            "gain1": str(self.input_gain[1]),
+            "offset0": str(self.input_offset[0]),
+            "offset1": str(self.input_offset[1]),
+        }
+        config["Output"] = {
+            "gain0": str(self.output_gain[0]),
+            "gain1": str(self.output_gain[1]),
+            "offset0": str(self.output_offset[0]),
+            "offset1": str(self.output_offset[1]),
+        }
+        with open(filename, "w") as f:
+            config.write(f)
+
+    def decode(self, y_bytes, order=1):
+        """
+        将字节流转为numpy数组，编码顺序为左/右声道时order为0，编码顺序为右/左声道时order为1
+        """
+        y = np.frombuffer(y_bytes, np.int16) / 32768
+        y0 = self.input_gain[0] * (y[order::2] - self.input_offset[0])
+        y1 = self.input_gain[1] * (y[1 - order :: 2] - self.input_offset[1])
+        return y0, y1
+
+    def zoom_input(self, y0, y1):
+        y0 = self.input_gain[0] * (y0 - self.input_offset[0])
+        y1 = self.input_gain[1] * (y1 - self.input_offset[1])
+        return y0, y1
+
+    def encode(self, y0, y1, order=1):
+        """
+        将numpy数组转换为字节串
+        """
+        y0 = y0 * self.output_gain[0] + self.output_offset[0]
+        y1 = y1 * self.output_gain[1] + self.output_offset[1]
+
+        if order:
+            y = np.array([y1, y0]).T.flatten()
+        else:
+            y = np.array([y0, y1]).T.flatten()
+        return (-y * 32768).astype(np.int16).tobytes()
 
 
 def linear_map(v, lim):
@@ -146,6 +220,17 @@ class BasicWindow(QMainWindow):
     def clear_status(self):
         self.statusbar.clearMessage()
         self.timer_status.stop()
+
+    def Centre(self, w, h):
+        desktop = QApplication.desktop()
+        screenRect = desktop.availableGeometry()
+
+        if w < 1 and h < 1:
+            w = screenRect.width() * w
+            h = screenRect.height() * h
+        self.setGeometry(
+            (screenRect.width() - w) // 2, (screenRect.height() - h) // 2, w, h
+        )
 
 
 class DataGrid(QWidget):
@@ -539,6 +624,30 @@ def load_data(filename: str, fs=0):
             return data
     except Exception as e:
         return repr(e)
+
+
+# unused functions
+def get_square_amp(y, t=0.8):
+    """
+    求方波的下电平和上电平
+    """
+    v0 = (np.max(y) + np.min(y)) / 2
+    y_bin = (y > v0) * 1
+    y_bin[1:] -= y_bin[:-1]
+    y_bin[0] = 0
+    pos = np.argwhere(y_bin != 0).flatten()
+    v1, v2 = [], []
+    for i in range(len(pos) - 1):
+        d = int((pos[i + 1] - pos[i]) * (1 - t) / 2)
+        v = np.mean(y[pos[i] + d : pos[i + 1] - d])
+        if y_bin[pos[i]] == 1:
+            v2.append(v)
+        else:
+            v1.append(v)
+    if len(v1) and len(v2):
+        return sum(v1) / len(v1), sum(v2) / len(v2)
+    else:
+        return False, False
 
 
 if __name__ == "__main__":

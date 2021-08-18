@@ -9,28 +9,28 @@ from pyqtgraph import PlotCurveItem
 from pyaudio import PyAudio, paInt16, paContinue
 
 from Ui_timeSpectrum import Ui_timeSpectrum
-from public import array_linear_map
+from public import array_linear_map, Config
 
 
 class timeSpectrum(Ui_timeSpectrum):
     signal_received_new_data = pyqtSignal()
 
-    def __init__(self, parent=None, chunk=4096, rate=48000, input_gain=15):
+    def __init__(self, parent=None, config=None):
         super().__init__(parent)
-        self.CHUNK = chunk
-        self.FORMAT = paInt16
-        self.CHANNELS = 2
-        self.RATE = rate
+
+        if config:
+            self.config = config
+        else:
+            self.config = Config("Audiono.ini")
 
         self.rec_bytes = bytes()
-        self.fft_win = np.hanning(self.CHUNK)
-        self.input_gain = input_gain
+        self.fft_win = np.hanning(self.config.CHUNK)
 
         self.RUNNING = False
 
         self.nframes, self.fft_num = self.Frames.value(), self.fftN.value()
         self.fft_maxn = self.fft_num // 2 + 1
-        self.f_max = self.RATE // 2
+        self.f_max = self.config.RATE // 2
         self.fn = [0, self.fft_maxn // self.fZoom.value()]
         self.f = np.linspace(0, self.f_max, self.fft_maxn)
 
@@ -81,15 +81,15 @@ class timeSpectrum(Ui_timeSpectrum):
     def update_win(self):
         win_type = self.WinType.currentIndex()
         if win_type == 0:
-            self.fft_win = np.hanning(self.CHUNK)
+            self.fft_win = np.hanning(self.config.CHUNK)
         elif win_type == 1:
-            self.fft_win = np.hamming(self.CHUNK)
+            self.fft_win = np.hamming(self.config.CHUNK)
         elif win_type == 2:
-            self.fft_win = np.blackman(self.CHUNK)
+            self.fft_win = np.blackman(self.config.CHUNK)
         elif win_type == 3:
-            self.fft_win = np.bartlett(self.CHUNK)
+            self.fft_win = np.bartlett(self.config.CHUNK)
         else:
-            self.fft_win = np.ones(self.CHUNK)
+            self.fft_win = np.ones(self.config.CHUNK)
 
     def on_RunButton_clicked(self):
         self.RUNNING = not self.RUNNING
@@ -210,7 +210,7 @@ class timeSpectrum(Ui_timeSpectrum):
 
     def reset_axis_t(self):
         y = np.linspace(0, 100, 10, endpoint=True)
-        factor = self.nframes / 100 * self.CHUNK / self.RATE
+        factor = self.nframes / 100 * self.config.CHUNK / self.config.RATE
         ticks = np.round(factor * y, 2)
         for i in [0, 1]:
             self.plt[i].setYRange(0, self.grid_size[2] + 100)
@@ -223,7 +223,7 @@ class timeSpectrum(Ui_timeSpectrum):
             )
 
         y = np.linspace(0, self.nframes, 10, endpoint=True)
-        factor = self.CHUNK / self.RATE
+        factor = self.config.CHUNK / self.config.RATE
         ticks = np.round(factor * y, 2)
         ax = self.heatmap_plt.getAxis("left")
         ax.setTicks([[(y[i], str(ticks[i])) for i in range(len(y))]])
@@ -283,17 +283,16 @@ class timeSpectrum(Ui_timeSpectrum):
             self.cnt = (self.cnt + 1) % 100
         else:
             self.cnt = 0
-        t = np.arange(self.CHUNK) / self.RATE
+        t = np.arange(self.config.CHUNK) / self.config.RATE
         amp, f = 10, 1000
         amp_n = amp / 10
         y1 = amp * np.sin(2 * np.pi * (f - self.cnt * 10) * t) + amp_n * np.random.rand(
-            self.CHUNK
+            self.config.CHUNK
         )
         y2 = amp * np.sin(2 * np.pi * (f + self.cnt * 10) * t) + amp_n * np.random.rand(
-            self.CHUNK
+            self.config.CHUNK
         )
-        y = np.array([y1, y2]).T.flatten()
-        self.rec_bytes = ((y / self.input_gain) * 32768).astype(np.int16).tobytes()
+        self.rec_bytes = self.config.encode(y1, y2)
 
     def callback(self, in_data, frame_count, time_info, status):
         data = bytes()
@@ -304,15 +303,18 @@ class timeSpectrum(Ui_timeSpectrum):
 
     def slot_received_new_data(self):
         self.update_fft_queue()
-        cid = 1 - self.Channel.currentIndex()
+        cid = self.Channel.currentIndex()
         self.img = np.array(self.fft_queue[cid])[:, self.fn[0] : self.fn[1]]
         self.update_plts()
 
     def update_fft_queue(self):
         # 如果先乘后除，乘完后仍是int16，会截断
-        data = np.frombuffer(self.rec_bytes, dtype=np.int16) / 32768 * self.input_gain
+        data = self.config.decode(self.rec_bytes)
         for cid in [0, 1]:
-            FFT = np.fft.rfft(data[cid::2] * self.fft_win, n=self.fft_num) / self.CHUNK
+            FFT = (
+                np.fft.rfft(data[cid] * self.fft_win, n=self.fft_num)
+                / self.config.CHUNK
+            )
             FFT_dB = 20 * np.log10(np.abs(FFT) + 1e-6)
             self.fft_queue[cid].popleft()
             self.fft_queue[cid].append(FFT_dB)
@@ -362,12 +364,12 @@ class timeSpectrum(Ui_timeSpectrum):
     def run(self):
         pa = PyAudio()
         stream = pa.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
+            format=paInt16,
+            channels=2,
+            rate=self.config.RATE,
             input=True,
             stream_callback=self.callback,
-            frames_per_buffer=self.CHUNK,
+            frames_per_buffer=self.config.CHUNK,
         )
         stream.start_stream()
 

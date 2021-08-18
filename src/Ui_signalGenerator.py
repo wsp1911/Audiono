@@ -28,10 +28,7 @@ class Ui_signalGenerator(BasicWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent, hasStatusBar=True, hasThread=True)
 
-        WIDTH, HEIGHT = 1000, 800
-
-        # self.setFixedSize(WIDTH, HEIGHT)
-        self.resize(WIDTH, HEIGHT)
+        self.Centre(1000, 800)
         self.setFont(QtGui.QFont("等线", 9))
         self.setWindowTitle("信号发生器")
 
@@ -71,17 +68,21 @@ class Ui_signalGenerator(BasicWindow):
         self.vppInput[0].setSingleStep(0.1)
         self.vppInput[0].setRange(-20, 20)
         self.vppInput[0].setValue(5)
+        self.vppInput[0].setDecimals(3)
         self.vppInput[1].setSingleStep(0.1)
         self.vppInput[1].setValue(5)
         self.vppInput[1].setRange(-20, 20)
+        self.vppInput[1].setDecimals(3)
 
         self.offsetInput = [QDoubleSpinBox(), QDoubleSpinBox()]
         self.offsetInput[0].setSingleStep(0.1)
         self.offsetInput[0].setValue(0)
         self.offsetInput[0].setRange(-10, 10)
+        self.offsetInput[0].setDecimals(3)
         self.offsetInput[1].setSingleStep(0.1)
         self.offsetInput[1].setValue(0)
         self.offsetInput[1].setRange(-20, 20)
+        self.offsetInput[1].setDecimals(3)
 
         self.dutyInput = [QDoubleSpinBox(), QDoubleSpinBox()]
         self.dutyInput[0].setMaximum(100.0)

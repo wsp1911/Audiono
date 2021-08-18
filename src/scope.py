@@ -2,83 +2,53 @@
 import numpy as np
 import sys
 import time
-import configparser
 from PyQt5.QtWidgets import QApplication, QFileDialog
 from PyQt5.QtCore import QTimer, pyqtSignal
 import pyqtgraph.exporters as pg_exporter
 from pyaudio import PyAudio, paInt16, paContinue
 
 from Ui_scope import Ui_scope
-from Ui_calibrator import Ui_calibrator
-from signalGenerator import signalGenerator
-from timeSpectrum import timeSpectrum
-from bodePlotter import bodePlotter
-from public import linear_map, save_data, find_first
+
+from public import linear_map, save_data, find_first, Config
 
 
 class scope(Ui_scope):
     signal_received = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config=None):
 
-        config = configparser.ConfigParser()
-        config.read("Audiono.ini")
-
-        if config.defaults():
-            found_ini = True
-            CHUNK = config["DEFAULT"].getint("CHUNK")
-            RATE = config["DEFAULT"].getint("RATE")
-            input_gain = config["Gain"].getfloat("input_gain")
-            output_gain = config["Gain"].getfloat("output_gain")
+        if config:
+            self.config = config
         else:
-            found_ini = False
-            CHUNK = 4096
-            RATE = 48000
-            input_gain = 10
-            output_gain = 1 / 15
-            config["DEFAULT"] = {"CHUNK": str(CHUNK), "RATE": str(RATE)}
-            config["Gain"] = {
-                "input_gain": str(input_gain),
-                "output_gain": str(output_gain),
-            }
-            with open("Audiono.ini", "w") as f:
-                config.write(f)
+            self.config = Config("Audiono.ini")
 
         # t1 = time.perf_counter()
-        super(scope, self).__init__(parent, rate=RATE)
+        super(scope, self).__init__(parent, rate=self.config.RATE)
         # print("load scope Ui time: %f" % (time.perf_counter() - t1))
 
         # t1 = time.perf_counter()
-        # 录音/播放设置
-        self.CHUNK = CHUNK
-        self.RATE = RATE
-        self.FORMAT = paInt16  # 表示我们使用量化位数 16位来进行录音
-        self.CHANNELS = 2  # 代表的是声道，1是单声道，2是双声道。
         # 信号参数
-        self.zero_bytes = np.zeros(2 * self.CHUNK, dtype=np.int16).tobytes()
-        self.rec_bytes = np.zeros(2 * self.CHUNK, dtype=np.int16).tobytes()
-        self.rec_y = [np.zeros(self.CHUNK), np.zeros(self.CHUNK)]
-        self.noise = np.zeros(self.CHUNK * 2)
-        self.input_gain = input_gain
-        self.output_gain = output_gain
+        self.zero_bytes = np.zeros(2 * self.config.CHUNK, dtype=np.int16).tobytes()
+        self.rec_bytes = np.zeros(2 * self.config.CHUNK, dtype=np.int16).tobytes()
+        self.rec_y = [np.zeros(self.config.CHUNK), np.zeros(self.config.CHUNK)]
         self.disp_start = [0, 0]
-        self.disp_len = self.CHUNK // 16
+        self.disp_len = self.config.CHUNK // 16
         self.disp_sig = [self.rec_y[0][: self.disp_len], self.rec_y[1][: self.disp_len]]
-        self.T = np.arange(self.CHUNK) / self.RATE
+        self.T = np.arange(self.config.CHUNK) / self.config.RATE
         self.t_max = self.T[self.disp_len - 1]
         self.TX = [0, 1]
         self.TY = [0, 1]
         # fft 参数
         self.nfft = self.fftN.value()
         num = self.nfft // 2 + 1
-        self.f_max = self.RATE / 2
+        self.f_max = self.config.RATE / 2
         self.FFT = [np.zeros(num), np.zeros(num)]
         self.disp_FFT = [-120 * np.ones(num), -120 * np.ones(num)]
         self.f = np.linspace(0, self.f_max, num)
         self.f_log = False
         self.f_lim = [0, self.f_max / self.fZoom.value()]
         self.fY_lim = [-120, 20]
-        self.fft_win = np.hanning(self.CHUNK)
+        self.fft_win = np.hanning(self.config.CHUNK)
         self.FX = [0, 1]
         self.FY = [0, 1]
         # 程序控制
@@ -89,8 +59,6 @@ class scope(Ui_scope):
         # 数据导出
         self.PICSAVE = False
         self.DATASAVE = False
-        # toolbar 事件
-        self.tb_actions = self.toolbar.actions()
 
         self.connect()
 
@@ -104,55 +72,12 @@ class scope(Ui_scope):
         self.t_f = 0
         self.plt_cnt = 0
 
-        if not found_ini:
-            self.warn("程序路径下未找到Audiono.ini，使用默认配置")
         # print("scope init time: %f" % (time.perf_counter() - t1))
-
-    def calibrate(self):
-        if not hasattr(self, "calibrator"):
-            # t1 = time.perf_counter()
-            self.calibrator = Ui_calibrator(scope=self)
-            # print("calibrator init time: %f" % (time.perf_counter() - t1))
-        self.calibrator.show()
-
-    def open_generator(self):
-        if not hasattr(self, "sg"):
-            self.sg = signalGenerator(
-                scope=self,
-                chunk=self.CHUNK,
-                rate=self.RATE,
-                output_gain=self.output_gain,
-            )
-        self.sg.show()
-
-    def open_time_spectrum(self):
-        if not hasattr(self, "ts"):
-            self.ts = timeSpectrum(
-                chunk=self.CHUNK,
-                rate=self.RATE,
-                input_gain=self.input_gain,
-            )
-        self.ts.show()
-
-    def open_bodePlotter(self):
-        if not hasattr(self, "bp"):
-            # t1 = time.perf_counter()
-            self.bp = bodePlotter(rate=self.RATE)
-            # print("bp init time: %f" % (time.perf_counter() - t1))
-        self.bp.show()
 
     def closeEvent(self, a0) -> None:
         """
         效果上看实现scope是各模块的parent，但避免了children窗口一直在parent之上的问题
         """
-        if hasattr(self, "sg"):
-            self.sg.close()
-        if hasattr(self, "bp"):
-            self.bp.close()
-        if hasattr(self, "calibrator"):
-            self.calibrator.close()
-        if hasattr(self, "ts"):
-            self.ts.close()
         if self.RUNNING:
             self.RUNNING = False
             self.RunButton.setState(True)
@@ -176,10 +101,6 @@ class scope(Ui_scope):
 
         self.RunButton.clicked.connect(self.on_RunButton_clicked)
         self.Channel.currentIndexChanged.connect(self.on_Channel_currentIndexChanged)
-        self.tb_actions[0].triggered.connect(self.calibrate)
-        self.tb_actions[1].triggered.connect(self.open_generator)
-        self.tb_actions[2].triggered.connect(self.open_time_spectrum)
-        self.tb_actions[3].triggered.connect(self.open_bodePlotter)
 
         # 多次connect就可以触发多个事件，amazing!
         # 多个事件按照连接的先后顺序执行！
@@ -274,13 +195,13 @@ class scope(Ui_scope):
             self.critical("所选数据与所选格式不匹配，保存失败")
         if filename[0]:
             if filename[1] == "Wave (*.wav)":
-                data_to_save = data_to_save / self.input_gain
+                data_to_save = data_to_save / self.config.input_gain
             if not save_data(
                 filename[0],
                 data_to_save,
                 channels=data_to_save.ndim,
                 sampwidth=2,
-                rate=self.RATE,
+                rate=self.config.RATE,
             ):
                 self.critical("保存文件失败")
 
@@ -298,8 +219,8 @@ class scope(Ui_scope):
                 data1 = np.array(self.record_data[1]).flatten()
                 data = np.array([data0, data1]).T
                 if filename[1] == "Wave (*.wav)":
-                    data /= self.input_gain
-                if not save_data(filename[0], data, sampwidth=2, rate=self.RATE):
+                    data /= self.config.input_gain
+                if not save_data(filename[0], data, sampwidth=2, rate=self.config.RATE):
                     self.critical("保存文件失败")
             self.record_data = [[], []]
         else:
@@ -310,7 +231,7 @@ class scope(Ui_scope):
                 self.warn("示波器尚未启动")
 
     def update_t_max(self):
-        length = int(self.CHUNK / self.tZoom.value())
+        length = int(self.config.CHUNK / self.tZoom.value())
         self.t_max = self.T[length - 1]
         if self.Channel.currentIndex() != 3:
             self.pw[0].setXRange(0, self.t_max)
@@ -325,15 +246,15 @@ class scope(Ui_scope):
     def update_fft_win(self):
         win_type = self.WinType.currentIndex()
         if win_type == 0:
-            self.fft_win = np.hanning(self.CHUNK)
+            self.fft_win = np.hanning(self.config.CHUNK)
         elif win_type == 1:
-            self.fft_win = np.hamming(self.CHUNK)
+            self.fft_win = np.hamming(self.config.CHUNK)
         elif win_type == 2:
-            self.fft_win = np.blackman(self.CHUNK)
+            self.fft_win = np.blackman(self.config.CHUNK)
         elif win_type == 3:
-            self.fft_win = np.bartlett(self.CHUNK)
+            self.fft_win = np.bartlett(self.config.CHUNK)
         else:
-            self.fft_win = np.ones(self.CHUNK)
+            self.fft_win = np.ones(self.config.CHUNK)
 
     def update_f_lim(self):
         f_range = self.f_max // self.fZoom.value()
@@ -462,7 +383,7 @@ class scope(Ui_scope):
 
     # WNR: when not running
     def update_disp_sig_WNR(self):
-        self.disp_len = int(self.CHUNK / self.tZoom.value())
+        self.disp_len = int(self.config.CHUNK / self.tZoom.value())
         self.trigger()
         self.disp_sig[0] = self.rec_y[0][
             self.disp_start[0] : self.disp_start[0] + self.disp_len
@@ -472,7 +393,7 @@ class scope(Ui_scope):
         ]
 
     def update_disp_sig(self):
-        self.disp_len = int(self.CHUNK / self.tZoom.value())
+        self.disp_len = int(self.config.CHUNK / self.tZoom.value())
         self.disp_sig[0] = self.rec_y[0][
             self.disp_start[0] : self.disp_start[0] + self.disp_len
         ]
@@ -486,7 +407,7 @@ class scope(Ui_scope):
 
     def update_disp_FFT(self):
         self.FFT = [
-            np.fft.rfft(self.fft_win * self.rec_y[i], n=self.nfft) / self.CHUNK
+            np.fft.rfft(self.fft_win * self.rec_y[i], n=self.nfft) / self.config.CHUNK
             for i in [0, 1]
         ]
         self.disp_FFT = [
@@ -558,13 +479,14 @@ class scope(Ui_scope):
         channel = self.Channel.currentIndex()
 
         # 显示FFT
-        if channel == 1:
-            self.pw[1].curve[0].setData(self.f, self.disp_FFT[0])
-        elif channel == 2:
-            self.pw[1].curve[1].setData(self.f, self.disp_FFT[1])
-        else:  # XY模式和双通道模式
-            self.pw[1].curve[0].setData(self.f, self.disp_FFT[0])
-            self.pw[1].curve[1].setData(self.f, self.disp_FFT[1])
+        if len(self.f) == len(self.disp_FFT[0]):  # 改变FFT点数时可能出现f更新但disp_FFT未更新的情况，故加此判断
+            if channel == 1:
+                self.pw[1].curve[0].setData(self.f, self.disp_FFT[0])
+            elif channel == 2:
+                self.pw[1].curve[1].setData(self.f, self.disp_FFT[1])
+            else:  # XY模式和双通道模式
+                self.pw[1].curve[0].setData(self.f, self.disp_FFT[0])
+                self.pw[1].curve[1].setData(self.f, self.disp_FFT[1])
 
         if t1 != 0:
             dt = time.perf_counter() - t1
@@ -595,9 +517,7 @@ class scope(Ui_scope):
         return self.disp_start
 
     def slot_received(self):
-        sig = np.frombuffer(self.rec_bytes, dtype=np.int16) / 32768 - self.noise
-        self.rec_y[0] = self.input_gain * sig[1::2]
-        self.rec_y[1] = self.input_gain * sig[::2]
+        self.rec_y[0], self.rec_y[1] = self.config.decode(self.rec_bytes)
         self.trigger()
 
         if self.RECORDING:
@@ -610,12 +530,12 @@ class scope(Ui_scope):
     def run(self):
         pa = PyAudio()
         stream = pa.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
+            format=paInt16,
+            channels=2,
+            rate=self.config.RATE,
             input=True,
             stream_callback=self.callback,
-            frames_per_buffer=self.CHUNK,
+            frames_per_buffer=self.config.CHUNK,
         )
         stream.start_stream()
         while self.RUNNING:

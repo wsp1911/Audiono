@@ -9,18 +9,19 @@ from pyaudio import PyAudio, paInt16, paContinue
 
 from Ui_bodePlotter import Ui_bodePlotter
 from cal_response import get_chunk, get_response
-from public import save_data, linear_map, worker
+from public import save_data, linear_map, worker, Config
 
 
 # class for the application window
 class bodePlotter(Ui_bodePlotter):
-    def __init__(self, parent=None, rate=48000):
-        super().__init__(parent, rate)
+    def __init__(self, parent=None, config=None):
+        if config:
+            self.config = config
+        else:
+            self.config = Config("Audiono.ini")
 
-        self.CHUNK = 1024
-        self.FORMAT = paInt16
-        self.CHANNELS = 2
-        self.RATE = rate
+        super().__init__(parent, self.config.RATE)
+
         self.play_bytes = b""
         self.rec_bytes = bytes()
 
@@ -35,7 +36,7 @@ class bodePlotter(Ui_bodePlotter):
         self.MEASURE_TYPE = 0  # 0表示测量新频点，1表示测量选中的已有频点
 
         self.f_log = False
-        self.f_lim = [0, self.RATE / 2]
+        self.f_lim = [0, self.config.RATE / 2]
         self.A_lim = [-120, 0]
         self.phi_lim = [0, 360]
 
@@ -253,7 +254,7 @@ class bodePlotter(Ui_bodePlotter):
             self.f_lim[0] = self.fPos.value() * (f_max - f_range - f_min) + f_min
             self.f_lim[1] = self.f_lim[0] + f_range
         else:
-            self.f_lim = [0, self.RATE / 2]
+            self.f_lim = [0, self.config.RATE / 2]
         if self.fLogCB.checkState():
             self.f_lim[0] = np.log10(self.f_lim[0]) if self.f_lim[0] > 0 else 0
             self.f_lim[1] = np.log10(self.f_lim[1])
@@ -333,7 +334,9 @@ class bodePlotter(Ui_bodePlotter):
         return (data, paContinue)
 
     def sine_bytes(self, f, tn, cnt):
-        y = 0.5 * np.sin(2 * np.pi * f * ((tn + self.CHUNK * cnt) / self.RATE))
+        y = 0.5 * np.sin(
+            2 * np.pi * f * ((tn + self.config.CHUNK * cnt) / self.config.RATE)
+        )
         y = np.repeat(y, 2)
         return (-y * 32768).astype(np.int16).tobytes()
 
@@ -366,7 +369,7 @@ class bodePlotter(Ui_bodePlotter):
                 self.quit_thread()
                 return
         if f_arr[0] < 5 and f_arr[0] != 0:
-            self.critical("最小频率应为 0 或在 [5, %d] 区间内，请检查输入后重试" % (self.RATE // 2))
+            self.critical("最小频率应为 0 或在 [5, %d] 区间内，请检查输入后重试" % (self.config.RATE // 2))
             self.quit_thread()
             return
 
@@ -380,19 +383,19 @@ class bodePlotter(Ui_bodePlotter):
             self.show_message("测量中：" + str(fid + 1) + "/" + str(len(f_arr)))
             pos_cnt = 0
             self.rec_bytes = bytes()
-            self.CHUNK = get_chunk(f, self.RATE)
-            tn = np.arange(self.CHUNK)
+            self.config.CHUNK = get_chunk(f, self.config.RATE)
+            tn = np.arange(self.config.CHUNK)
             self.play_bytes = self.sine_bytes(f, tn, 0)
             cnt = 1
 
             stream = pa.open(
-                format=self.FORMAT,
-                channels=self.CHANNELS,
-                rate=self.RATE,
+                format=paInt16,
+                channels=2,
+                rate=self.config.RATE,
                 input=True,
                 output=True,
                 stream_callback=self.callback,
-                frames_per_buffer=self.CHUNK,
+                frames_per_buffer=self.config.CHUNK,
             )
 
             stream.start_stream()
@@ -410,7 +413,8 @@ class bodePlotter(Ui_bodePlotter):
 
                 rec_bytes_copy = self.rec_bytes
                 rec_data = (
-                    np.fromstring(rec_bytes_copy[-self.CHUNK :], dtype=np.int16) / 32768
+                    np.fromstring(rec_bytes_copy[-self.config.CHUNK :], dtype=np.int16)
+                    / 32768
                 )
                 if L_reg != len(rec_bytes_copy) and np.max(rec_data) > 0.02:
                     L_reg = len(rec_bytes_copy)
@@ -437,7 +441,7 @@ class bodePlotter(Ui_bodePlotter):
             y0 = rec_data[1::2]
             y1 = rec_data[::2]
             # np.save("bp_rec_test/y_%d.npy" % f, np.array([y0, y1]))
-            A, phi = get_response(f, self.RATE, self.CHUNK, y0, y1)
+            A, phi = get_response(f, self.config.RATE, self.config.CHUNK, y0, y1)
             resp[f] = (A, phi)
 
         resp_list = []

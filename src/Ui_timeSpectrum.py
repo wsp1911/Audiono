@@ -27,25 +27,16 @@ class Ui_timeSpectrum(BasicWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent, hasThread=True)
 
-        # 获取显示器分辨率大小
-        desktop = QApplication.desktop()
-        screenRect = desktop.availableGeometry()
-        HEIGHT = int(0.7 * screenRect.height())
-        WIDTH = HEIGHT + 300
-
-        self.setGeometry(
-            (screenRect.width() - WIDTH) // 2,
-            (screenRect.height() - HEIGHT) // 2,
-            WIDTH,
-            HEIGHT,
-        )
+        self.Centre(0.8, 0.7)
         self.setWindowTitle("时谱图仪")
         font_size = 9
         self.setFont(QFont("等线", font_size))
 
         self.setCentralWidget(QWidget())
 
-        self.MainWidget = WidgetWithSplitter(self.centralWidget(), sizes=[WIDTH, 0])
+        self.MainWidget = WidgetWithSplitter(
+            self.centralWidget(), sizes=[self.width(), 0]
+        )
         self.leftGrid = self.MainWidget.getGrid(0)
         self.rightGrid = self.MainWidget.getGrid(1)
 
@@ -198,8 +189,7 @@ class Ui_timeSpectrum(BasicWindow):
             self.glw[i].setVisible(i == idx)
 
     def adjust_size(self):
-        WIDTH, HEIGHT = self.width(), self.height()
-        self.MainWidget.setGeometry(0, 0, WIDTH, HEIGHT)
+        self.MainWidget.setGeometry(0, 0, self.width(), self.height())
 
 
 if __name__ == "__main__":

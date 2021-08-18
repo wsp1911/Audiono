@@ -74,25 +74,15 @@ class bp_plot_widget(PlotWidget):
 class Ui_bodePlotter(BasicWindow):
     def __init__(self, parent=None, rate=48000):
         super().__init__(parent, hasStatusBar=True)
-        desktop = QApplication.desktop()
-
-        # 获取显示器分辨率大小
-        screenRect = desktop.availableGeometry()
-        WIDTH = int(0.9 * screenRect.width())
-        HEIGHT = int(0.8 * screenRect.height())
-
+        self.Centre(0.9, 0.8)
         font_size = 9
-        self.setGeometry(
-            (screenRect.width() - WIDTH) // 2,
-            (screenRect.height() - HEIGHT) // 2,
-            WIDTH,
-            HEIGHT,
-        )
         self.setFont(QFont("等线", font_size))
         self.setWindowTitle("波特图仪")
         self.setCentralWidget(QWidget())
 
-        self.MainWidget = WidgetWithSplitter(self.centralWidget(), sizes=[WIDTH, 0])
+        self.MainWidget = WidgetWithSplitter(
+            self.centralWidget(), sizes=[self.width(), 0]
+        )
         self.leftGrid = self.MainWidget.getGrid(0)
         self.rightGrid = self.MainWidget.getGrid(1)
 
